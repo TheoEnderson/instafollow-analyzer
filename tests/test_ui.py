@@ -156,6 +156,52 @@ def test_layouts_fit_viewport_and_controls_remain_reachable(app, size, dark):
         window.close()
 
 
+@pytest.mark.parametrize("dark", [True, False])
+def test_import_buttons_reflow_with_wide_minima_and_back(app, dark):
+    from PySide6.QtWidgets import QBoxLayout
+
+    window = MainWindow()
+    if window.dark != dark:
+        window.toggle_theme()
+    drop = window.home.drop
+    # Reproduz no Linux os 656 px da linha observada no CI Windows:
+    # 296 + 296 + 12 de espaçamento + 48 de margens + 4 de bordas.
+    # Somente a fixture impõe larguras; a interface usa as métricas reais dos botões.
+    for button in (drop.file_button, drop.folder_button):
+        button.setMinimumWidth(296)
+    window.show()
+    try:
+        for size in [(640, 560), (820, 620), (1180, 820), (1920, 1080), (640, 560)]:
+            window.resize(*size)
+            # A reorganização produz LayoutRequests também nos layouts ancestrais.
+            for _ in range(5):
+                app.processEvents()
+            scroll = window.pages.widget(0)
+            assert scroll.horizontalScrollBar().maximum() == 0
+            assert window.home.minimumSizeHint().width() <= scroll.viewport().width()
+            assert drop.minimumSizeHint().width() <= drop.width()
+            assert window.home.content.width() <= 820
+            content_center = window.home.content.mapTo(
+                scroll.widget(), window.home.content.rect().center()
+            )
+            assert abs(content_center.x() - scroll.viewport().rect().center().x()) <= 1
+            if size[0] == 640:
+                assert drop.buttons.direction() == QBoxLayout.Direction.TopToBottom
+                assert drop.file_button.geometry().bottom() < drop.folder_button.geometry().top()
+            else:
+                assert drop.buttons.direction() == QBoxLayout.Direction.LeftToRight
+                assert drop.file_button.y() == drop.folder_button.y()
+            for button in (drop.file_button, drop.folder_button):
+                assert button.width() >= max(296, button.minimumSizeHint().width())
+                assert button.height() >= button.minimumSizeHint().height()
+                assert drop.layout().contentsRect().contains(button.geometry())
+                scroll.ensureWidgetVisible(button)
+                app.processEvents()
+                assert button.visibleRegion().boundingRect().height() == button.height()
+    finally:
+        window.close()
+
+
 def test_empty_state_selection_actions_and_double_click(app, make_export, export_data, monkeypatch):
     from PySide6.QtGui import QDesktopServices
     from PySide6.QtTest import QTest

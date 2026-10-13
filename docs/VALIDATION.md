@@ -1,5 +1,48 @@
 # Registro de validação
 
+## Reorganização dos botões após a segunda execução Windows — 13/10/2026
+
+Resultado remoto informado pelo mantenedor: 138 testes aprovados e duas falhas
+de layout em Windows Server 2022, Python 3.12/3.14, nos dois temas em 640×560.
+Parser e caminhos de drag and drop aprovados. Os valores `drop_min=656`,
+`content_min=656`, `page_min=704` e viewport 626 localizaram a restrição na DropArea.
+
+Antes desta correção, um experimento local impondo mínimos de 296 px a cada
+botão reproduziu **exatamente** esses valores e 78 px de rolagem: a linha
+horizontal somava 592 px de botões, 12 px de espaçamento e 52 px de margens/bordas.
+Alterar apenas QLabel não removia a restrição de largura da linha de botões.
+O experimento é uma regressão controlada no Linux, não um teste Windows nativo.
+
+A DropArea agora usa QBoxLayout adaptável: compara a largura disponível com os
+size hints/mínimos reais dos dois botões e o espaçamento. Os botões ficam em
+coluna quando não cabem e voltam à linha quando há espaço. Ambos permanecem
+centralizados, com dimensões suficientes para seus textos. Não há largura fixa
+de botão nem breakpoint arbitrário no código da interface.
+
+O mínimo horizontal da DropArea representa a disposição em coluna (maior botão
+mais margens/bordas). A restrição automática de mínimo do layout interno foi
+substituída por esse minimumSizeHint, mantendo a altura mínima do layout atual.
+Isso evita que a disposição horizontal imponha um mínimo largo ao widget e
+impeça o próximo redimensionamento para coluna. Resize, mudanças de estilo/fonte
+e LayoutRequest recalculam a direção. Nenhuma barra de rolagem foi ocultada.
+
+Na regressão local, os mínimos passaram a drop 348/page 396, com zero rolagem
+horizontal em 640×560. Em 820×620, 1180×820 e 1920×1080 os botões voltaram à linha;
+ao retornar a 640×560, voltaram à coluna. O limite de conteúdo de 820 px,
+centralização, textos, ações e navegação existentes foram preservados.
+
+Validação local: **142 testes aprovados** em Python 3.12.3 e 3.14.4, Qt offscreen
+no Linux. Mantidos os 140 anteriores e acrescentadas duas regressões (temas
+claro/escuro) com mínimos de botão ampliados. Elas percorrem as quatro resoluções
+e o retorno à menor, conferindo geometria, ausência de sobreposição, mínimos,
+centralização e visibilidade completa por rolagem vertical. Ruff, formatação e
+`git diff --check` aprovados.
+
+**Pendente:** próxima execução real no Windows Server 2022 com Python 3.12/3.14,
+incluindo os oito casos originais de resolução/tema e as duas novas regressões.
+Somente esse resultado confirmará o ajuste com as métricas nativas Windows.
+Não houve alteração de parser, análise, exportação ou empacotamento, nem commit/push.
+
 ## Correções após a primeira execução Windows do CI — 13/10/2026
 
 Resultado remoto informado pelo mantenedor: Linux aprovado; Windows Server 2022

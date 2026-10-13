@@ -1,11 +1,13 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -25,6 +27,9 @@ class DropArea(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(12)
+        # O mínimo horizontal é o da disposição vertical, mesmo quando os botões
+        # estão lado a lado. Não deixar o layout fixar no widget o mínimo da linha.
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         self.title = QLabel("↓  Arraste sua exportação para cá")
         self.title.setObjectName("sectionTitle")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -35,17 +40,63 @@ class DropArea(QFrame):
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setWordWrap(True)
         layout.addWidget(label)
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-        file_button = QPushButton("Selecionar arquivo ZIP")
-        file_button.setObjectName("primary")
-        file_button.clicked.connect(self.choose_file)
-        folder_button = QPushButton("Selecionar pasta")
-        folder_button.clicked.connect(self.choose_folder)
-        buttons.addWidget(file_button)
-        buttons.addWidget(folder_button)
-        buttons.addStretch()
-        layout.addLayout(buttons)
+        self.buttons = QBoxLayout(QBoxLayout.Direction.TopToBottom)
+        self.buttons.addStretch()
+        self.file_button = QPushButton("Selecionar arquivo ZIP")
+        self.file_button.setObjectName("primary")
+        self.file_button.clicked.connect(self.choose_file)
+        self.folder_button = QPushButton("Selecionar pasta")
+        self.folder_button.clicked.connect(self.choose_folder)
+        self.buttons.addWidget(self.file_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.buttons.addWidget(self.folder_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.buttons.addStretch()
+        layout.addLayout(self.buttons)
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        if hasattr(self, "buttons"):
+            margins = self.layout().contentsMargins()
+            button_width = max(
+                max(button.minimumWidth(), button.minimumSizeHint().width())
+                for button in (self.file_button, self.folder_button)
+            )
+            hint.setWidth(button_width + margins.left() + margins.right() + 2 * self.frameWidth())
+        return hint
+
+    def reflow_buttons(self) -> None:
+        required = (
+            sum(
+                max(
+                    button.minimumWidth(),
+                    button.minimumSizeHint().width(),
+                    button.sizeHint().width(),
+                )
+                for button in (self.file_button, self.folder_button)
+            )
+            + self.buttons.spacing()
+        )
+        direction = (
+            QBoxLayout.Direction.LeftToRight
+            if required <= self.layout().contentsRect().width()
+            else QBoxLayout.Direction.TopToBottom
+        )
+        if self.buttons.direction() != direction:
+            self.buttons.setDirection(direction)
+            self.updateGeometry()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.reflow_buttons()
+
+    def event(self, event) -> bool:
+        result = super().event(event)
+        if hasattr(self, "buttons") and event.type() in (
+            QEvent.Type.LayoutRequest,
+            QEvent.Type.StyleChange,
+            QEvent.Type.FontChange,
+        ):
+            self.reflow_buttons()
+        return result
 
     def choose_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
