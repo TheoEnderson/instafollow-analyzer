@@ -4,6 +4,11 @@ Aplicativo desktop de código aberto para comparar seguidores e seguindo em
 exportações JSON oficiais do Instagram. Feito com Python e PySide6, com
 processamento local, sem login e sem telemetria.
 
+**Disponível exclusivamente como código-fonte.** Os executáveis oficiais para
+Windows e Linux ainda não foram publicados: a redistribuição das dependências
+nativas depende da conclusão da revisão de licenciamento. Para utilizar o
+aplicativo, siga as instruções de instalação pelo código-fonte abaixo.
+
 ## Funcionalidades
 
 - Importação de ZIP ou pasta extraída, por seleção ou arrastar e soltar.
@@ -39,43 +44,24 @@ Os rótulos dos menus podem mudar. Consulte a
 [Central de Ajuda oficial](https://help.instagram.com/181231772500920).
 HTML não é suportado. Não envie seu ZIP para este repositório nem para serviços externos.
 
-## Executar uma distribuição
+## Disponibilidade dos executáveis
 
-Após um build do GitHub Actions, os artefatos ficam na execução em **Actions →
-Tests and desktop builds → Artifacts** (é necessário acesso à execução).
-Não há release publicada automaticamente.
+Não há executáveis oficiais para download público, inclusive em Releases.
+O GitHub Actions continua executando testes, builds e verificações de
+empacotamento, mas só permite o upload de pacotes e checksums quando o
+repositório é **privado**. Nessa condição, candidatos para validação interna
+ficam em **Actions → Tests and desktop builds → Artifacts**, por até 14 dias.
+Esses candidatos não estão aprovados para redistribuição pública.
+O relatório de auditoria ABI do Linux pode continuar disponível sem executáveis.
 
-**Alvos Windows 10 (1809+) e 11, 64 bits — ainda não validados:** extraia o pacote inteiro e abra
-`InstaFollowAnalyzer.exe`. Mantenha a pasta `_internal` ao lado do executável.
-O pacote é configurado para incluir o runtime Python. Isso ainda precisa ser
-confirmado pelo build e teste Windows. Builds iniciais não têm assinatura digital.
+Antes de mudar a visibilidade do repositório para público, remova os artefatos
+antigos que contêm executáveis ou aguarde sua expiração. A condição do workflow
+não remove uploads de execuções anteriores. Não reexecute versões antigas do
+workflow que ainda permitem esses uploads.
 
-**Linux desktop x86_64 — validação local limitada:** extraia o pacote inteiro, preserve as permissões e abra
-`InstaFollowAnalyzer`. Caso o gerenciador de arquivos não preserve a permissão,
-marque **Permitir executar como programa** nas propriedades do arquivo. Não mova
-apenas o executável, pois `_internal` contém bibliotecas necessárias.
-
-O executável Linux inclui o runtime Python e iniciou em Qt offscreen no host de
-build, fora do projeto e sem Python no PATH. Isso não comprova compatibilidade com
-outras distribuições. O pacote local não iniciou no contêiner Debian 13: a GLib
-copiada do host exige GLIBC_2.43, enquanto o contêiner possui glibc 2.41.
-Esse pacote local **não está aprovado para distribuição pública**.
-
-O workflow de build está configurado para Ubuntu 22.04 para reduzir a exigência
-de glibc, mas ainda não foi executado no GitHub neste projeto. O build agora
-confere a baseline glibc 2.35 e recusa pacotes com requisitos ELF superiores.
-Ubuntu 22.04 x86_64 é a baseline planejada; outras distribuições glibc precisam
-de testes próprios. Distribuições musl (como Alpine) não são alvo deste pacote.
-Ainda depende de bibliotecas gráficas do sistema (X11/XCB ou Wayland, OpenGL,
-fontconfig e libxkbcommon). Em Ubuntu/Debian, os pacotes usuais são:
-
-```bash
-sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
-  libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1
-```
-
-Os nomes variam por distribuição. Não há promessa de um único binário para
-qualquer Linux; gere na distribuição mais antiga que pretende suportar.
+As pendências estão registradas em
+[RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) e
+[FINAL_RELEASE_AUDIT.md](docs/FINAL_RELEASE_AUDIT.md).
 
 ## Executar pelo código-fonte
 
@@ -100,6 +86,16 @@ python3 -m venv .venv
 Se `venv` não estiver disponível no Linux, instale o pacote `python3-venv`
 correspondente à versão escolhida usando o gerenciador da distribuição.
 O download de dependências exige internet apenas na instalação/desenvolvimento.
+
+No Linux, o Qt também depende de bibliotecas gráficas do sistema. Em
+Ubuntu/Debian, os pacotes usuais são:
+
+```bash
+sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+  libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1
+```
+
+Os nomes variam por distribuição.
 
 ## Usar a interface
 
@@ -190,7 +186,7 @@ também executa essa checagem antes de preparar o arquivo final. Trocar/remover
 bibliotecas isoladamente ou alterar a glibc do host não resolve o build auditado.
 
 O comando PyInstaller cria `dist/InstaFollowAnalyzer/`. O empacotador acrescenta
-avisos/licenças, fontes correspondentes de terceiros e do aplicativo, manifesto
+avisos/licenças, fontes upstream de Qt/PySide/Python e fontes do aplicativo, manifesto
 de versões e produz `dist/InstaFollowAnalyzer-0.1.0-<sistema>-x86_64.zip` (Windows) ou
 `.tar.gz` (Linux), com um arquivo `.sha256` ao lado de cada pacote.
 No Linux, valide-o com `sha256sum -c <pacote>.sha256`; no Windows, compare
@@ -205,12 +201,15 @@ No Windows, use `.venv\Scripts\python` para todos os comandos; no Linux,
 sem incorporar o módulo Python QtNetwork nem o navegador WebEngine. Bibliotecas
 nativas de rede podem acompanhar dependências Qt; a análise não as utiliza.
 Não há compilação cruzada.
-Confira também as obrigações das bibliotecas nativas em `THIRD_PARTY_NOTICES.md`
-antes de publicar uma release. O workflow está configurado para executar esses
-passos em Ubuntu 22.04 e Windows Server 2022 x64, com versões de dependências
+As fontes upstream incluídas não cobrem todas as bibliotecas nativas nem
+comprovam, sozinhas, a correspondência com os binários. Confira os bloqueios
+em [FINAL_RELEASE_AUDIT.md](docs/FINAL_RELEASE_AUDIT.md) antes de distribuir.
+O workflow está configurado para executar esses passos em Ubuntu 22.04 e Windows Server 2022 x64, com versões de dependências
 fixadas em `requirements-build.txt` (não é um lock de todo o sistema).
-Ele testa também a extração do arquivo final e preserva pacotes e checksums
-em artefatos. Empacote um build limpo: arquivos extras na pasta do executável
+Ele testa também a extração do arquivo final. O upload de pacotes e checksums
+é permitido somente em repositórios privados; testes e builds continuam
+executando em repositórios públicos. Esses builds são candidatos para validação
+interna enquanto a distribuição não for aprovada. Empacote um build limpo: arquivos extras na pasta do executável
 interrompem o empacotamento; cópias de fontes excluem JSON/ZIP, arquivos ocultos
 e links simbólicos. Ele não publica releases nem faz commits.
 
@@ -218,7 +217,7 @@ No Windows, a checagem confere PE x64/GUI, runtime, DLLs Qt/MSVC e plugins.
 O smoke test usa Qt offscreen e confirma que o processo permanece ativo por três
 segundos com PATH isolado. Isso é um teste automatizado de inicialização; não
 testa interação gráfica nem substitui Windows 10/11 sem Python instalado.
-Veja a investigação por componente em [DISTRIBUTION_AUDIT.md](docs/DISTRIBUTION_AUDIT.md).
+Veja a auditoria dos pacotes reais em [FINAL_RELEASE_AUDIT.md](docs/FINAL_RELEASE_AUDIT.md).
 
 ## Privacidade, segurança e limites
 
@@ -267,5 +266,11 @@ PyInstaller, Ruff e GitHub Actions.
 
 A preparação não equivale a uma release aprovada. Consulte o checklist e as
 pendências verificadas em [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
-Windows, desktops Linux reais, execução do CI e revisão completa das licenças
-nativas continuam pendentes. Não há publicação automática.
+Os seis jobs do [CI auditado](https://github.com/TheoEnderson/instafollow-analyzer/actions/runs/38348981710)
+passaram, incluindo Windows Server 2022 e Ubuntu 22.04 com Python 3.12/3.14.
+Os testes manuais relatados estão registrados na auditoria final. O código-fonte
+está disponível, mas **os executáveis oficiais ainda não foram publicados e sua
+distribuição pública permanece bloqueada por pendências de licenciamento nativo**,
+detalhadas no checklist. As 74 entradas Linux foram identificadas e seus fontes/
+patches preparados; continuam bloqueando a aprovação os termos Microsoft e a
+correspondência completa das configurações/fontes Qt/PySide. Não há publicação automática.

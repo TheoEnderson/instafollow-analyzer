@@ -92,8 +92,9 @@ jobs:
           path: build/linux-abi.json
           if-no-files-found: warn
           retention-days: 14
-      - name: Upload candidates for manual validation
-        if: success()
+      # Binary redistribution is not approved; keep candidates private.
+      - name: Upload candidates for private manual validation
+        if: ${{ success() && github.event.repository.private == true }}
         uses: actions/upload-artifact@v6
         with:
           name: InstaFollowAnalyzer-${{ runner.os }}-x86_64-candidate
