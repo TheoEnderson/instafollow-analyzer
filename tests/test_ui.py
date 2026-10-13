@@ -25,6 +25,50 @@ def wait_until(app, condition):
     app.processEvents()
 
 
+def results_layout_diagnostics(scroll, results):
+    components = {
+        "page": results,
+        "top": results.top,
+        "title": results.title,
+        "cards": results.cards_layout,
+        "reciprocity": results.reciprocity,
+        "reciprocity_label": results.reciprocity_label,
+        "notice": results.deleted_notice,
+        "tabs": results.tabs,
+        "search": results.search,
+        "toolbar": results.toolbar,
+        "table": results.table,
+        "empty_state": results.empty_state,
+        "bottom": results.bottom,
+        "back": results.back_button,
+        "export": results.export_button,
+        "export_all": results.export_all_button,
+        "copy_name": results.copy_name,
+        "copy_link": results.copy_link,
+        "open": results.open_button,
+        **{f"card_{index}": card for index, card in enumerate(results.cards)},
+    }
+    metrics = {}
+    for name, item in components.items():
+        metrics[name] = {
+            "geometry": item.geometry().getRect(),
+            "minimum_hint": (
+                item.minimumSizeHint() if hasattr(item, "minimumSizeHint") else item.minimumSize()
+            ).toTuple(),
+            "hint": item.sizeHint().toTuple(),
+        }
+        if hasattr(item, "sizePolicy"):
+            metrics[name]["minimum_width"] = item.minimumWidth()
+            metrics[name]["policy"] = str(item.sizePolicy().horizontalPolicy())
+    return str(
+        {
+            "viewport": scroll.viewport().size().toTuple(),
+            "scroll": scroll.horizontalScrollBar().maximum(),
+            "components": metrics,
+        }
+    )
+
+
 def test_async_import_search_sort_copy_export_and_reset(
     app,
     make_export,
@@ -129,7 +173,9 @@ def test_layouts_fit_viewport_and_controls_remain_reachable(app, size, dark):
         app.processEvents()
         results = window.results
         scroll = window.pages.widget(1)
-        assert scroll.horizontalScrollBar().maximum() == 0
+        assert scroll.horizontalScrollBar().maximum() == 0, results_layout_diagnostics(
+            scroll, results
+        )
         for button in (
             results.back_button,
             results.export_button,
@@ -150,8 +196,91 @@ def test_layouts_fit_viewport_and_controls_remain_reachable(app, size, dark):
         app.processEvents()
         window.resize(*size)
         app.processEvents()
-        assert scroll.horizontalScrollBar().maximum() == 0
+        assert scroll.horizontalScrollBar().maximum() == 0, results_layout_diagnostics(
+            scroll, results
+        )
         assert results.cards_layout.count() == 5
+    finally:
+        window.close()
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_results_reflow_wide_controls_without_outer_scroll(app, dark):
+    from PySide6.QtTest import QTest
+
+    from instafollow_analyzer.core.analyzer import analyze
+    from instafollow_analyzer.core.models import Relationships
+
+    window = MainWindow()
+    if window.dark != dark:
+        window.toggle_theme()
+    results = window.results
+    actions = (results.copy_name, results.copy_link, results.open_button)
+    # Linha inferior antiga: 213 + 213 + 212 + 20 + 48 = 706 px,
+    # ou 80 px além do viewport de 626. Exercitar também outros grupos largos.
+    for button, width in zip(actions, (213, 213, 212), strict=True):
+        button.setMinimumWidth(width)
+    for button in (results.export_button, results.export_all_button):
+        button.setMinimumWidth(300)
+    for card in results.cards:
+        card.setMinimumWidth(300)
+    results.table.horizontalHeader().setMinimumSectionSize(240)
+    window.show()
+    window.show_results(
+        analyze(
+            Relationships(
+                frozenset({"_deleted_demo", "ana_demo"}), frozenset({"_deleted_demo", "bruno_demo"})
+            )
+        )
+    )
+    try:
+        for size in [(1920, 1080), (640, 560), (820, 620), (1180, 820), (1920, 1080), (640, 560)]:
+            window.resize(*size)
+            for _ in range(5):
+                app.processEvents()
+            scroll = window.pages.widget(1)
+            diagnostic = results_layout_diagnostics(scroll, results)
+            assert scroll.horizontalScrollBar().maximum() == 0, diagnostic
+            assert results.minimumSizeHint().width() <= scroll.viewport().width(), diagnostic
+            assert results.cards_layout.count() == 5
+            bounds = results.layout().contentsRect()
+            for card in results.cards:
+                assert card.width() >= card.minimumWidth()
+                assert bounds.contains(card.geometry()), diagnostic
+            controls = (
+                results.back_button,
+                results.export_button,
+                results.export_all_button,
+                *actions,
+            )
+            for button in controls:
+                assert button.width() >= max(
+                    button.minimumWidth(), button.minimumSizeHint().width()
+                ), diagnostic
+                assert button.height() >= button.minimumSizeHint().height(), diagnostic
+                assert bounds.contains(button.geometry()), diagnostic
+                scroll.ensureWidgetVisible(button)
+                app.processEvents()
+                assert button.visibleRegion().boundingRect().height() == button.height(), diagnostic
+            assert bounds.contains(results.search.geometry()), diagnostic
+            if size[0] == 640:
+                assert results.export_button.geometry().bottom() < results.export_all_button.y()
+                assert results.copy_name.geometry().bottom() < results.copy_link.y()
+                assert results.copy_link.geometry().bottom() < results.open_button.y()
+                assert results.card_columns == 1
+                assert results.table.horizontalScrollBar().maximum() > 0
+            if size[0] == 1920:
+                assert results.card_columns == 5
+                assert results.export_button.y() == results.export_all_button.y()
+                assert results.copy_name.y() == results.copy_link.y() == results.open_button.y()
+            scroll.ensureWidgetVisible(results.tabs)
+            results.tabs.setFocus()
+            results.tabs.setCurrentIndex(0)
+            for index in (1, 2):
+                QTest.keyClick(results.tabs, Qt.Key.Key_Right)
+                app.processEvents()
+                assert results.tabs.currentIndex() == index
+                assert results.tabs.rect().contains(results.tabs.tabRect(index)), diagnostic
     finally:
         window.close()
 

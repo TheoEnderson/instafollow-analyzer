@@ -1,5 +1,58 @@
 # Registro de validação
 
+## Resultados responsivos após a terceira execução Windows — 13/10/2026
+
+Resultado remoto informado pelo mantenedor: tela inicial aprovada no Windows;
+resultados ainda com 80 px de rolagem horizontal externa em 640×560, nos dois
+temas e Python 3.12/3.14 (140 aprovações, duas falhas). Linux aprovado.
+
+Investigação local antes da alteração: a tabela tinha minimumSizeHint horizontal
+de 70 px, as abas 123 px, cards em duas colunas 217 px, toolbar 295 px e ações
+inferiores 373 px. Search era Expanding, botões Minimum e textos Preferred.
+Os botões inferiores continuavam em três colunas, e os de exportação em duas,
+mesmo no modo compacto. A grade de cards considerava somente breakpoints, sem
+conferir os mínimos reais. Esses grupos podiam propagar suas somas para a página.
+
+O código anterior do commit foi exercitado localmente com mínimos de ações de
+213, 213 e 212 px: mínimo inferior 658, página 706, viewport 626 e rolagem **80**.
+É uma reprodução controlada Linux do problema estrutural, não uma medição das
+larguras individuais dos botões Windows, ainda não fornecidas pelo CI.
+
+Correções restritas à apresentação da ResultsPage:
+
+- Exportações e ações passam para coluna quando suas larguras reais não cabem.
+  O modo amplo mantém a disposição anterior quando há espaço suficiente.
+- Cards reduzem o número de colunas conforme o maior mínimo real; os cinco
+  continuam presentes, chegando a uma coluna quando necessário.
+- O mínimo da página representa controles reorganizados individualmente, mais
+  suas margens; o layout não pode fixar no widget o mínimo de uma linha larga e
+  impedir a redução seguinte. A altura mínima permanece baseada no layout atual.
+- Cabeçalho também pode passar para coluna. Textos com quebra de linha preservam
+  heightForWidth sem impor seus hints horizontais à página.
+- Abas usam os botões de rolagem próprios do Qt e mantêm os títulos completos;
+  regressões verificam troca de categoria por teclado e visibilidade da aba ativa.
+- Pesquisa permanece adaptável; tabela conserva a rolagem interna das colunas.
+  Nenhuma barra externa foi ocultada e nenhum controle foi removido.
+- Resize, LayoutRequest e mudanças de fonte/estilo recalculam as disposições.
+
+Os diagnósticos dos testes agora incluem viewport, geometria, minimumSizeHint,
+sizeHint, minimumWidth e política horizontal de página, cabeçalho, cards, barra,
+avisos, abas, pesquisa, tabela, exportações e ações. Falhas podem ser localizadas
+sem depender apenas do valor da barra externa.
+
+Validação local: **144 testes aprovados** em Python 3.12.3 e 3.14.4; Ruff,
+formatação e `git diff --check` aprovados. Preservados os 142 anteriores.
+Duas regressões novas, uma por tema, ampliam mínimos de ações, exportações e
+cards; percorrem 1920×1080 → 640×560 → 820×620 → 1180×820 → 1920×1080 → 640×560.
+Conferem todos os cinco cards, mínimos e geometria dos controles, acesso integral
+por rolagem vertical, abas por teclado e retorno à disposição ampla. Na menor
+resolução, a tabela pode rolar internamente e a página externa permanece em zero.
+
+**Confirmação definitiva pendente:** executar novamente no Windows Server 2022,
+Python 3.12 e 3.14, com os oito casos originais e as duas novas regressões. A
+reprodução local não substitui esse resultado nem testes gráficos interativos.
+Parser, análise, exportação e empacotamento não foram alterados. Sem commit/push.
+
 ## Reorganização dos botões após a segunda execução Windows — 13/10/2026
 
 Resultado remoto informado pelo mantenedor: 138 testes aprovados e duas falhas

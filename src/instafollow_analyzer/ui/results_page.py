@@ -1,18 +1,28 @@
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, QUrl, Signal
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QEvent,
+    QModelIndex,
+    QSortFilterProxyModel,
+    Qt,
+    QUrl,
+    Signal,
+)
 from PySide6.QtGui import QDesktopServices, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QBoxLayout,
     QFrame,
     QGridLayout,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QLineEdit,
     QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QTabBar,
     QTableView,
     QVBoxLayout,
@@ -74,15 +84,18 @@ class ResultsPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 24)
         layout.setSpacing(12)
-        top = QHBoxLayout()
-        title = QLabel("Suas conexões, em perspectiva")
-        title.setWordWrap(True)
-        title.setObjectName("title")
-        top.addWidget(title, 1)
+        # O mínimo representa os controles reorganizados, não a soma de uma linha
+        # larga. Isso permite reduzir a página e então recalcular as disposições.
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self.top = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.title = QLabel("Suas conexões, em perspectiva")
+        self.title.setWordWrap(True)
+        self.title.setObjectName("title")
+        self.top.addWidget(self.title, 1)
         self.back_button = QPushButton("Analisar outro arquivo")
         self.back_button.clicked.connect(self.back)
-        top.addWidget(self.back_button)
-        layout.addLayout(top)
+        self.top.addWidget(self.back_button)
+        layout.addLayout(self.top)
         note = QLabel(
             "Retrato da exportação importada. Mudanças posteriores no Instagram não aparecem aqui."
         )
@@ -136,6 +149,8 @@ class ResultsPage(QWidget):
         layout.addWidget(self.deleted_notice)
         self.tabs = QTabBar()
         self.tabs.setExpanding(False)
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.setElideMode(Qt.TextElideMode.ElideNone)
         for label in CATEGORY_LABELS.values():
             self.tabs.addTab(label)
         self.tabs.currentChanged.connect(self.refresh_category)
@@ -242,6 +257,53 @@ class ResultsPage(QWidget):
         footer.setWordWrap(True)
         footer.setObjectName("subtitle")
         layout.addWidget(footer)
+        for label in self.findChildren(QLabel):
+            if label.wordWrap():
+                policy = label.sizePolicy()
+                policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+                label.setSizePolicy(policy)
+
+    @staticmethod
+    def control_width(widget) -> int:
+        return max(
+            widget.minimumWidth(), widget.minimumSizeHint().width(), widget.sizeHint().width()
+        )
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        if hasattr(self, "compact"):
+            controls = (
+                self.back_button,
+                self.export_button,
+                self.export_all_button,
+                self.copy_name,
+                self.copy_link,
+                self.open_button,
+                self.visible_count,
+                self.search,
+                self.tabs,
+                self.table,
+                self.empty_state,
+                self.reciprocity,
+                *self.cards,
+            )
+            width = max(
+                max(widget.minimumWidth(), widget.minimumSizeHint().width()) for widget in controls
+            )
+            margins = self.layout().contentsMargins()
+            hint.setWidth(width + margins.left() + margins.right())
+        return hint
+
+    def event(self, event) -> bool:
+        result = super().event(event)
+        if hasattr(self, "compact") and event.type() in (
+            QEvent.Type.LayoutRequest,
+            QEvent.Type.FontChange,
+            QEvent.Type.StyleChange,
+        ):
+            self.reflow_cards()
+            self.reflow_controls()
+        return result
 
     @property
     def category(self) -> str:
@@ -293,22 +355,47 @@ class ResultsPage(QWidget):
             self.reflow_controls()
 
     def reflow_controls(self) -> None:
-        compact = self.width() < 900
-        if compact == self.compact:
+        available = self.layout().contentsRect().width()
+        exports = (self.export_button, self.export_all_button)
+        actions = (self.copy_name, self.copy_link, self.open_button)
+        export_width = (
+            sum(self.control_width(button) for button in exports) + self.toolbar.spacing()
+        )
+        action_width = (
+            sum(self.control_width(button) for button in actions) + 2 * self.bottom.spacing()
+        )
+        compact = (
+            self.width() < 900
+            or self.control_width(self.search) + export_width + self.toolbar.spacing() > available
+            or self.control_width(self.visible_count) + action_width + self.bottom.spacing()
+            > available
+        )
+        export_columns = 2 if export_width <= available else 1
+        action_columns = 3 if action_width <= available else 1
+        self.top.setDirection(
+            QBoxLayout.Direction.LeftToRight
+            if self.title.minimumSizeHint().width()
+            + self.control_width(self.back_button)
+            + self.top.spacing()
+            <= available
+            else QBoxLayout.Direction.TopToBottom
+        )
+        state = (compact, export_columns, action_columns)
+        if state == self.compact:
             return
-        self.compact = compact
+        self.compact = state
         for grid in (self.toolbar, self.bottom):
             while grid.count():
                 grid.takeAt(0)
             for column in range(4):
                 grid.setColumnStretch(column, 0)
         if compact:
-            self.toolbar.addWidget(self.search, 0, 0, 1, 2)
-            self.toolbar.addWidget(self.export_button, 1, 0)
-            self.toolbar.addWidget(self.export_all_button, 1, 1)
-            self.bottom.addWidget(self.visible_count, 0, 0, 1, 3)
-            for column, button in enumerate((self.copy_name, self.copy_link, self.open_button)):
-                self.bottom.addWidget(button, 1, column)
+            self.toolbar.addWidget(self.search, 0, 0, 1, export_columns)
+            for index, button in enumerate(exports):
+                self.toolbar.addWidget(button, 1 + index // export_columns, index % export_columns)
+            self.bottom.addWidget(self.visible_count, 0, 0, 1, action_columns)
+            for index, button in enumerate(actions):
+                self.bottom.addWidget(button, 1 + index // action_columns, index % action_columns)
         else:
             self.toolbar.addWidget(self.search, 0, 0)
             self.toolbar.addWidget(self.export_button, 0, 1)
@@ -318,9 +405,16 @@ class ResultsPage(QWidget):
             self.bottom.setColumnStretch(0, 1)
             for column, button in enumerate((self.copy_name, self.copy_link, self.open_button), 1):
                 self.bottom.addWidget(button, 0, column)
+        self.updateGeometry()
 
     def reflow_cards(self) -> None:
         columns = 5 if self.width() >= 1050 else 3 if self.width() >= 760 else 2
+        available = self.layout().contentsRect().width()
+        minimum = max(
+            max(card.minimumWidth(), card.minimumSizeHint().width()) for card in self.cards
+        )
+        spacing = self.cards_layout.spacing()
+        columns = min(columns, max(1, (available + spacing) // (minimum + spacing)))
         if columns == self.card_columns:
             return
         for column in range(5):
@@ -328,6 +422,7 @@ class ResultsPage(QWidget):
         for index, card in enumerate(self.cards):
             self.cards_layout.addWidget(card, index // columns, index % columns)
         self.card_columns = columns
+        self.updateGeometry()
 
     def refresh_category(self, *_args) -> None:
         names = self.analysis.categories()[self.category] if self.analysis else frozenset()
