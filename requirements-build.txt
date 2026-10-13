@@ -1,0 +1,10 @@
+# Versões auditadas para os builds v0.1.0. Não é um lock completo do sistema/runner.
+# Usar como constraints: python -m pip install -c requirements-build.txt -e ".[dev]"
+PySide6==6.12.0
+PyInstaller==6.22.3
+pyinstaller-hooks-contrib==2026.8
+altgraph==0.17.5
+packaging==26.3
+setuptools==84.0.0
+pytest==9.1.1
+ruff==0.17.0

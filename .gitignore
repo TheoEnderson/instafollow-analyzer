@@ -1,0 +1,47 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+# Exportações pessoais nunca devem entrar no repositório.
+*.[zZ][iI][pP]
+*.[jJ][sS][oO][nN]
+*.[jJ][sS][oO][nN][lL]
+*.[jJ][sS][oO][nN]5
+exports/
+
+# Credenciais e configurações locais
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets/
+.aws/
+.codex/
+.agents/
+# Dados exportados e arquivos de trabalho
+*.[cC][sS][vV]
+*.log
+*.tmp
+*.partial
+*.bak
+*~
+*.swp
+*.swo
+*.[tT][xX][tT]
+!requirements*.txt
+.pypirc
+.netrc
