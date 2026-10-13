@@ -156,13 +156,17 @@ def _decode(raw: bytes, kind: str) -> set[str]:
 
 
 def _safe_zip_entry(info: zipfile.ZipInfo) -> None:
-    path = PurePosixPath(info.filename)
+    # ZipInfo normaliza separadores conforme o SO e trunca NUL em filename.
+    # Validar o nome original evita que essa normalização esconda entradas inseguras.
+    name = info.orig_filename
+    path = PurePosixPath(name)
     mode = info.external_attr >> 16
     if (
         path.is_absolute()
         or ".." in path.parts
-        or "\\" in info.filename
-        or ":" in info.filename
+        or "\\" in name
+        or ":" in name
+        or "\x00" in name
         or stat.S_ISLNK(mode)
     ):
         raise DataError("ZIP contém caminhos inseguros. Use o arquivo oficial sem modificações.")

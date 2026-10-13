@@ -1,5 +1,48 @@
 # Registro de validação
 
+## Correções após a primeira execução Windows do CI — 13/10/2026
+
+Resultado remoto informado pelo mantenedor: Linux aprovado; Windows Server 2022
+com Python 3.12 e 3.14 apresentou 129 aprovações e quatro falhas em cada ambiente.
+As alterações abaixo ainda precisam de uma nova execução real desses jobs.
+
+- ZIP: `ZipInfo.filename` é normalizado conforme o SO (barras invertidas viram
+  barras normais no Windows) e truncado no primeiro NUL. O parser passou a validar
+  `orig_filename` antes de classificar/ler as entradas, mantendo rejeição de
+  caminhos absolutos, `..`, barras invertidas, `:`, symlinks e criptografia, e
+  acrescentando rejeição explícita de NUL. Nenhuma extração foi introduzida.
+- O escritor ZIP usado pelo teste também podia normalizar o nome no Windows.
+  O teste de caminhos perigosos agora grava literalmente o nome nos cabeçalhos
+  e confere `orig_filename` ao reabrir. Casos adicionais cobrem travessia interna,
+  unidade relativa/absoluta Windows, UNC e NUL; uma regressão também confere um
+  ZipInfo já normalizado, inclusive no host Linux.
+  [Implementação oficial CPython](https://github.com/python/cpython/blob/3.12/Lib/zipfile/__init__.py).
+- Layout inicial: os textos com quebra de linha deixaram de impor largura mínima
+  baseada nos seus hints de fonte/plataforma (`QSizePolicy.Ignored` somente no eixo
+  horizontal). A política vertical e `heightForWidth` são preservados. Margens,
+  tipografia, botões e configuração das barras de rolagem permanecem iguais.
+  Os 78 pixels de excesso observados no Windows não foram reproduzidos neste host;
+  a eficácia com as métricas nativas Windows precisa de confirmação no CI.
+  Os testes existentes passaram a conferir também largura, posição horizontal
+  e visibilidade completa dos botões de importação após rolagem vertical.
+  [Políticas de tamanho Qt](https://doc.qt.io/qt-6/qsizepolicy.html).
+- Drag and drop: o teste compara objetos `Path`, aceitando a representação
+  equivalente emitida por QUrl no Windows. A implementação de drag and drop
+  permanece igual, assim como a distinção de caminhos no Linux.
+
+Validação local desta etapa: **140 testes aprovados** em Python 3.12.3 e 3.14.4,
+com Qt offscreen no Linux. Preservados os 133 testes anteriores, com sete casos
+novos de segurança ZIP. Ruff, formatação, `git diff --check`, `pip check` e
+validação estática do workflow por actionlint aprovados.
+
+Pendente: repetir o GitHub Actions em Windows Server 2022 com Python 3.12/3.14;
+conferir ausência de rolagem horizontal em 640×560 nos dois temas e preservação
+das outras resoluções; prosseguir para os builds e smoke tests apenas se os testes
+passarem. Testes gráficos interativos Windows e portabilidade dos artefatos
+continuam separados da suíte offscreen. Nenhum commit ou push feito pelo agente.
+
+## Registros das etapas anteriores
+
 Validação local em 12/10/2026 (America/Sao_Paulo).
 
 ## Revisão de distribuição da v0.1.0

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -171,6 +172,13 @@ class HomePage(QWidget):
         privacy.setObjectName("eyebrow")
         layout.addWidget(privacy)
         layout.addStretch(1)
+        # A largura vem do viewport; textos quebram linhas em vez de impor
+        # mínimos dependentes das métricas de fonte/plataforma. Preservar heightForWidth.
+        for label in self.findChildren(QLabel):
+            if label.wordWrap():
+                policy = label.sizePolicy()
+                policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+                label.setSizePolicy(policy)
 
     def set_busy(self, busy: bool) -> None:
         self.drop.setEnabled(not busy)

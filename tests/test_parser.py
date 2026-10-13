@@ -8,6 +8,7 @@ import pytest
 from instafollow_analyzer.core.models import DataError
 from instafollow_analyzer.core.parser import (
     Limits,
+    _safe_zip_entry,
     load_export,
     normalize_username,
     parse_relationships,
@@ -179,10 +180,41 @@ def test_incomplete_or_ambiguous_export(make_export, names):
         load_export(make_export(dict.fromkeys(names, [])))
 
 
-@pytest.mark.parametrize("name", ["../bad.txt", "/bad.txt", "C:/bad.txt", "a\\bad.txt"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "../bad.txt",
+        "a/../bad.txt",
+        "/bad.txt",
+        "C:/bad.txt",
+        "C:bad.txt",
+        "C:\\bad.txt",
+        "a\\bad.txt",
+        "\\\\host\\share\\bad.txt",
+        "followers_1.json\x00/../bad.txt",
+    ],
+)
 def test_unsafe_paths(make_export, name):
+    source = make_export({"followers_1.json": [], "following.json": []})
+    # O escritor padrão normaliza barras invertidas no Windows. Preservar o
+    # nome literal nos cabeçalhos para testar um ZIP realmente malicioso em todo SO.
+    with zipfile.ZipFile(source, "a") as archive:
+        info = zipfile.ZipInfo(name)
+        info.filename = name
+        archive.writestr(info, b"")
+    with zipfile.ZipFile(source) as archive:
+        assert archive.infolist()[-1].orig_filename == name
     with pytest.raises(DataError, match="inseguros"):
-        load_export(make_export({"followers_1.json": [], "following.json": [], name: b""}))
+        load_export(source)
+
+
+@pytest.mark.parametrize("name", ["a\\bad.txt", "followers_1.json\x00/../bad.txt"])
+def test_zip_validation_checks_original_name_before_normalization(name):
+    info = zipfile.ZipInfo(name)
+    # Exercitar no Linux também o estado produzido pelo ZipInfo no Windows.
+    info.filename = name.split("\x00", 1)[0].replace("\\", "/")
+    with pytest.raises(DataError, match="inseguros"):
+        _safe_zip_entry(info)
 
 
 def test_zip_symlink(tmp_path):

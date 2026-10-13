@@ -1,10 +1,11 @@
 """Integração Qt offscreen: sinais, importação assíncrona, filtros e exportação."""
 
 import time
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QEventLoop, Qt
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPushButton
 
 from instafollow_analyzer.ui.main_window import MainWindow
 
@@ -103,7 +104,20 @@ def test_layouts_fit_viewport_and_controls_remain_reachable(app, size, dark):
         app.processEvents()
         assert window.home.content.width() <= 820
         home_scroll = window.pages.widget(0)
-        assert home_scroll.horizontalScrollBar().maximum() == 0
+        assert home_scroll.horizontalScrollBar().maximum() == 0, (
+            f"viewport={home_scroll.viewport().width()}, "
+            f"page_min={window.home.minimumSizeHint().width()}, "
+            f"content_min={window.home.content.minimumSizeHint().width()}, "
+            f"drop_min={window.home.drop.minimumSizeHint().width()}"
+        )
+        for button in window.home.drop.findChildren(QPushButton):
+            assert button.width() >= button.minimumSizeHint().width()
+            point = button.mapTo(home_scroll.widget(), button.rect().topLeft())
+            assert point.x() >= 0
+            assert point.x() + button.width() <= home_scroll.viewport().width()
+            home_scroll.ensureWidgetVisible(button)
+            app.processEvents()
+            assert button.visibleRegion().boundingRect().height() == button.height()
         window.show_results(
             analyze(
                 Relationships(
@@ -306,7 +320,7 @@ def test_drop_area_highlights_only_supported_local_inputs(app, tmp_path):
             Qt.KeyboardModifier.NoModifier,
         )
         app.sendEvent(area, drop)
-        assert selected == [str(tmp_path / "ficticio.zip")]
+        assert [Path(path) for path in selected] == [tmp_path / "ficticio.zip"]
         assert not area.property("dragActive")
         invalid = QMimeData()
         invalid.setUrls([QUrl("https://example.invalid/export.zip")])
