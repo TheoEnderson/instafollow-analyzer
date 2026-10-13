@@ -5,6 +5,7 @@ import pytest
 from scripts.audit_linux import audit_bundle, required_versions
 from scripts.check_bundle import check_archive_checksum, check_windows_executable
 from scripts.package import (
+    collected_path_key,
     copy_icu_notice,
     copy_project_tree,
     copy_source_notices,
@@ -87,6 +88,140 @@ def test_reject_missing_runtime_file(collected_bundle):
 def test_missing_build_inventory_fails_closed(tmp_path):
     with pytest.raises(RuntimeError, match="Inventário"):
         verify_collected_files(tmp_path, tmp_path / "missing.toc")
+
+
+def test_windows_toc_nested_separators_and_case(collected_bundle, monkeypatch):
+    bundle, inventory = collected_bundle
+    monkeypatch.setattr("scripts.package.platform.system", lambda: "Windows")
+    (bundle / "_internal/PySide6").mkdir()
+    (bundle / "_internal/PySide6/QtCore.pyd").write_bytes(b"ficticio")
+    inventory.write_text(
+        repr(
+            (
+                [
+                    ("instafollowanalyzer", r"D:\build\app.exe", "EXECUTABLE"),
+                    ("RUNTIME.SO", r"D:\venv\runtime.so", "BINARY"),
+                    (r"PySide6\qtcore.PYD", r"D:\venv\QtCore.pyd", "EXTENSION"),
+                ],
+            )
+        )
+    )
+    verify_collected_files(bundle, inventory)
+    (bundle / "_internal/runtime.so").unlink()
+    with pytest.raises(RuntimeError, match="ausentes=1"):
+        verify_collected_files(bundle, inventory)
+
+
+@pytest.mark.parametrize("name", ["RUNTIME.SO", r"sub\runtime.so"])
+def test_linux_does_not_fold_case_or_backslashes(collected_bundle, monkeypatch, name):
+    bundle, inventory = collected_bundle
+    monkeypatch.setattr("scripts.package.platform.system", lambda: "Linux")
+    if "\\" in name:
+        (bundle / "_internal/sub").mkdir()
+        (bundle / "_internal/runtime.so").rename(bundle / "_internal/sub/runtime.so")
+    inventory.write_text(
+        repr(
+            (
+                [
+                    ("InstaFollowAnalyzer", "/build/app", "EXECUTABLE"),
+                    (name, "/build/runtime", "BINARY"),
+                ],
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="ausentes=1; inesperados=1"):
+        verify_collected_files(bundle, inventory)
+
+
+def test_mismatch_diagnostics_are_bounded_and_redact_unknown_names(collected_bundle, monkeypatch):
+    bundle, inventory = collected_bundle
+    monkeypatch.setattr("scripts.package.platform.system", lambda: "Windows")
+    for index in range(30):
+        (bundle / "_internal" / f"private-account-{index:02}.json").write_text("private-content")
+    (bundle / "_internal/runtime.so").unlink()
+    with pytest.raises(RuntimeError) as error:
+        verify_collected_files(bundle, inventory)
+    message = str(error.value)
+    assert "Esperados=2; encontrados=31; ausentes=1; inesperados=30" in message
+    assert "_internal/runtime.so" in message
+    assert message.count("nome redigido sha256=") == 12
+    assert "private-account" not in message
+    assert "private-content" not in message
+    assert "build/executable" not in message
+    assert len(message) < 5000
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "../outside.dll",
+        r"a\..\outside.dll",
+        "/outside.dll",
+        r"C:\outside.dll",
+        "C:outside.dll",
+        r"\\host\share\outside.dll",
+        "bad\x00.dll",
+        "a/./../outside.dll",
+    ],
+)
+def test_collected_paths_reject_unsafe_destinations(name):
+    for windows in (True, False):
+        with pytest.raises(RuntimeError, match="inseguro"):
+            collected_path_key(name, windows=windows)
+
+
+def test_collected_paths_only_normalize_safe_relative_aliases():
+    assert collected_path_key(r"PySide6\./QtCore.pyd", windows=True) == "pyside6/qtcore.pyd"
+    assert collected_path_key("PySide6//./QtCore.pyd", windows=False) == "PySide6/QtCore.pyd"
+
+
+def test_windows_toc_collision_is_rejected(collected_bundle, monkeypatch):
+    bundle, inventory = collected_bundle
+    monkeypatch.setattr("scripts.package.platform.system", lambda: "Windows")
+    inventory.write_text(
+        repr(
+            (
+                [
+                    ("runtime.so", "source-a", "BINARY"),
+                    ("RUNTIME.SO", "source-b", "BINARY"),
+                ],
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="Colisão"):
+        verify_collected_files(bundle, inventory)
+
+
+def test_unknown_toc_kind_is_not_silently_ignored(collected_bundle):
+    bundle, inventory = collected_bundle
+    inventory.write_text(repr(([("runtime.so", "source", "UNKNOWN")],)))
+    with pytest.raises(RuntimeError, match="não suportado"):
+        verify_collected_files(bundle, inventory)
+
+
+def test_external_pkg_uses_bundle_root(collected_bundle):
+    import ast
+
+    bundle, inventory = collected_bundle
+    records = ast.literal_eval(inventory.read_text())[0]
+    records.append(("application.pkg", "source", "PKG"))
+    inventory.write_text(repr((records,)))
+    (bundle / "application.pkg").write_bytes(b"ficticio")
+    verify_collected_files(bundle, inventory)
+
+
+def test_external_symlink_remains_rejected(collected_bundle, tmp_path):
+    bundle, inventory = collected_bundle
+    outside = tmp_path / "outside.so"
+    outside.write_bytes(b"ficticio")
+    runtime = bundle / "_internal/runtime.so"
+    runtime.unlink()
+    try:
+        runtime.symlink_to(outside)
+    except OSError:
+        pytest.skip("Links simbólicos indisponíveis")
+    with pytest.raises(RuntimeError, match="link externo"):
+        verify_collected_files(bundle, inventory)
 
 
 def test_glibc_requirements_exclude_exported_definitions():

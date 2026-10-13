@@ -13,7 +13,7 @@ import tarfile
 import tomllib
 import urllib.request
 from importlib.metadata import distribution, version
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from PySide6.QtCore import qVersion
 
@@ -147,15 +147,96 @@ PROJECT_DOCUMENTS = {
 GENERATED_DIRECTORIES = {"third-party", "application-source", "assets", "docs"}
 
 
+def collection_mismatch(
+    expected: set[str], actual: set[str], missing: set[str], unexpected: set[str]
+) -> str:
+    """Somente destinos relativos; nomes extras desconhecidos são redigidos."""
+    limit = 12
+
+    def equivalent(name: str) -> str:
+        return name.replace("\\", "/").lower()
+
+    known = {equivalent(name) for name in expected}
+    mode = (
+        "Windows: separadores e caixa"
+        if platform.system() == "Windows"
+        else "POSIX: caixa preservada"
+    )
+
+    def display(name: str, trusted: bool) -> str:
+        if trusted or equivalent(name) in known:
+            return repr(name[:180]) + (" [truncado]" if len(name) > 180 else "")
+        digest = hashlib.sha256(name.encode("utf-8", errors="replace")).hexdigest()[:12]
+        suffix = PurePosixPath(name).suffix.lower()
+        if suffix not in {".json", ".zip", ".csv", ".txt", ".dll", ".pyd", ".so", ".exe"}:
+            suffix = "<outro>"
+        return f"<nome redigido sha256={digest} sufixo={suffix!r}>"
+
+    def sample(names: set[str], trusted: bool) -> list[str]:
+        return [display(name, trusted) for name in sorted(names)[:limit]]
+
+    return (
+        "Pacote contém arquivos extras ou está incompleto. Refaça um build limpo.\n"
+        f"Esperados={len(expected)}; encontrados={len(actual)}; "
+        f"ausentes={len(missing)}; inesperados={len(unexpected)}.\n"
+        f"Ausentes (até {limit}, caminhos relativos): {sample(missing, True)}\n"
+        f"Inesperados (até {limit}; nomes desconhecidos redigidos): {sample(unexpected, False)}\n"
+        f"Representação: sistema={platform.system()}; "
+        f"comparação={mode}; "
+        f"TOC com barra invertida={sum('\\' in name for name in expected)}; "
+        f"encontrados com barra invertida={sum('\\' in name for name in actual)}. "
+        "Nenhum caminho de origem ou conteúdo de arquivo foi registrado."
+    )
+
+
+def collected_path_key(name: str, *, windows: bool) -> str:
+    """Normaliza destinos relativos sem aceitar unidades, travessia ou aliases ambíguos."""
+    if (
+        not name
+        or "\x00" in name
+        or ":" in name
+        or PureWindowsPath(name).anchor
+        or PurePosixPath(name).is_absolute()
+        or ".." in name.replace("\\", "/").split("/")
+    ):
+        raise RuntimeError("Inventário contém destino inseguro; refaça um build limpo.")
+    path = PurePosixPath(name.replace("\\", "/") if windows else name)
+    if path.as_posix() == "." or (
+        windows and any(part.endswith((".", " ")) for part in path.parts)
+    ):
+        raise RuntimeError("Inventário contém destino ambíguo; refaça um build limpo.")
+    return path.as_posix().lower() if windows else path.as_posix()
+
+
 def verify_collected_files(bundle: Path, inventory: Path) -> None:
     """Recusa arquivos extras e incompletos em vez de publicar conteúdo do usuário."""
     if not inventory.is_file():
         raise RuntimeError("Inventário de build ausente. Refaça o build com PyInstaller.")
-    records = ast.literal_eval(inventory.read_text(encoding="utf-8"))[0]
-    expected = {
-        name if kind == "EXECUTABLE" else f"_internal/{name}" for name, _source, kind in records
-    }
-    actual = set()
+    try:
+        toc = ast.literal_eval(inventory.read_text(encoding="utf-8"))
+        if not isinstance(toc, tuple) or len(toc) != 1 or not isinstance(toc[0], list):
+            raise ValueError()
+        records = toc[0]
+        if any(
+            not isinstance(row, tuple) or len(row) != 3 or not all(isinstance(v, str) for v in row)
+            for row in records
+        ):
+            raise ValueError()
+    except (ValueError, SyntaxError, UnicodeError):
+        raise RuntimeError("Formato de inventário COLLECT inválido; refaça o build.") from None
+    windows = platform.system() == "Windows"
+    expected: dict[str, str] = {}
+    for name, _source, kind in records:
+        if kind not in {"EXECUTABLE", "PKG", "BINARY", "EXTENSION", "DATA", "SYMLINK"}:
+            raise RuntimeError("Tipo de entrada COLLECT não suportado; revise o inventário.")
+        # Validar antes de prefixar: _internal/C:/... também não é um destino seguro.
+        collected_path_key(name, windows=windows)
+        destination = name if kind in {"EXECUTABLE", "PKG"} else f"_internal/{name}"
+        key = collected_path_key(destination, windows=windows)
+        if key in expected:
+            raise RuntimeError("Colisão entre destinos do inventário após normalização.")
+        expected[key] = destination
+    actual: dict[str, str] = {}
     for root, directories, files in os.walk(bundle, followlinks=False):
         if Path(root) == bundle:
             directories[:] = [name for name in directories if name not in GENERATED_DIRECTORIES]
@@ -164,11 +245,17 @@ def verify_collected_files(bundle: Path, inventory: Path) -> None:
             if file.is_symlink() and not file.resolve().is_relative_to(bundle.resolve()):
                 raise RuntimeError("Pacote contém link externo. Refaça um build limpo.")
             if file.is_file() or file.is_symlink():
-                actual.add(file.relative_to(bundle).as_posix())
-    if actual - expected - PROJECT_DOCUMENTS or expected - actual:
+                name = file.relative_to(bundle).as_posix()
+                key = collected_path_key(name, windows=windows)
+                if key in actual:
+                    raise RuntimeError("Colisão entre arquivos do pacote após normalização.")
+                actual[key] = name
+    allowed = {collected_path_key(name, windows=windows) for name in PROJECT_DOCUMENTS}
+    missing = {expected[key] for key in expected.keys() - actual.keys()}
+    unexpected = {actual[key] for key in actual.keys() - expected.keys() - allowed}
+    if missing or unexpected:
         raise RuntimeError(
-            "Pacote contém arquivos extras ou está incompleto. Refaça um build limpo "
-            "em vez de empacotar uma pasta usada para guardar dados."
+            collection_mismatch(set(expected.values()), set(actual.values()), missing, unexpected)
         )
 
 

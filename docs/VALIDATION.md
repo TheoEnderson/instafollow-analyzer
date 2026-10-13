@@ -1,5 +1,53 @@
 # Registro de validação
 
+## Inventário COLLECT após a quarta execução do CI — 13/10/2026
+
+O mantenedor informou sucesso dos quatro jobs de testes e do build Linux;
+o build Windows passou pelo smoke inicial e falhou na comparação do inventário,
+antes de preparar o pacote. O TOC/arquivo Windows real não está disponível neste
+ambiente; uma eventual divergência adicional dependerá dos novos diagnósticos.
+
+Foi conferido o código instalado e oficial de PyInstaller 6.22.3: COLLECT guarda
+um tuple contendo a lista de triplas (destino, origem, tipo). EXECUTABLE e PKG
+externo ficam na raiz; DATA, BINARY, EXTENSION e SYMLINK ficam em `_internal`
+na configuração deste spec. Nenhuma mudança de spec ou workflow foi necessária.
+[Implementação COLLECT](https://github.com/pyinstaller/pyinstaller/blob/v6.22.3/PyInstaller/building/api.py).
+
+Uma causa concreta foi reproduzida antes da correção: destino TOC
+`PySide6\QtCore.pyd` era prefixado literalmente como `_internal/PySide6\QtCore.pyd`,
+enquanto a varredura produzia `_internal/PySide6/QtCore.pyd`. Para os mesmos dois
+arquivos, o validador antigo relatou um ausente e um inesperado. Também foram
+examinadas diferenças de caixa, tipos, localização na raiz e colisões.
+
+O validador agora compara chaves relativas coerentes com a plataforma: no Windows,
+separadores são uniformizados e caixa normalizada; no Linux, caixa e barras
+invertidas literais permanecem distintas. `..`, unidades, caminhos absolutos,
+NUL e aliases Windows com ponto/espaço final são recusados antes da comparação.
+Colisões não são silenciosamente deduplicadas. Tipos desconhecidos e formato de
+TOC inválido interrompem o processo; nenhuma nova exceção para arquivo extra foi
+adicionada. Links externos continuam recusados.
+
+Primeiro foram implementados diagnósticos, depois a normalização. Em divergência,
+o erro informa contagens esperadas/encontradas/ausentes/inesperadas, até 12 exemplos
+por lista (nomes até 180 caracteres), modo de comparação e contagem de caminhos
+com barra invertida. Mostra somente destinos relativos do inventário; nomes extras
+desconhecidos são redigidos com identificador SHA-256 abreviado e extensão segura.
+Não imprime caminhos absolutos de origem nem conteúdo dos arquivos.
+
+Validação local: **161 testes aprovados** em Python 3.12.3 e 3.14.4; Ruff,
+formatação e `git diff --check` aprovados. Regressões cobrem TOC Windows aninhado,
+caixa, distinção Linux, arquivo ausente, extras pessoais, limites/redação dos
+logs, destinos inseguros, colisões, tipos desconhecidos, PKG externo e symlinks.
+O inventário COLLECT e diretório Linux reais disponíveis passaram na nova
+comparação; isso não transforma o pacote Linux local antigo em release aprovada.
+
+**Pendente:** repetir o build Windows Server 2022. Confirmar aprovação do inventário,
+empacotamento, checksum/smoke do ZIP extraído e upload do candidato. Se ainda falhar,
+analisar as contagens, destinos relativos ausentes e seus pares inesperados nos
+logs; nenhuma conclusão sobre arquivos realmente ausentes/extras pode ser tomada
+apenas a partir da mensagem genérica anterior. Sem commit/push ou mudanças de UI,
+parser, análise, exportação ou configuração de build nesta etapa.
+
 ## Resultados responsivos após a terceira execução Windows — 13/10/2026
 
 Resultado remoto informado pelo mantenedor: tela inicial aprovada no Windows;
